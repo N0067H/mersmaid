@@ -11,7 +11,7 @@ use tao::{
     dpi::LogicalSize,
     event::Event,
     event::WindowEvent,
-    event_loop::{ControlFlow, EventLoop},
+    event_loop::{ControlFlow, EventLoopBuilder},
     window::WindowBuilder,
 };
 use wry::WebViewBuilder;
@@ -26,8 +26,24 @@ const PAGE_HTML: &str = r#"<!doctype html>
     :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
     * { box-sizing: border-box; }
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    html, body, body * {
+      cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='24' viewBox='0 0 18 24'%3E%3Cpath d='M2 1.5v17l4.2-4.1 3.2 7.4 3.3-1.4-3.2-7.2h6.1z' fill='white' stroke='black' stroke-width='1.5' stroke-linejoin='round'/%3E%3C/svg%3E") 2 2, default !important;
+    }
     body { background: #f7f7f8; color: #202124; }
-    #viewport { width: 100%; height: 100%; overflow: auto; padding: 28px; }
+    #titlebar {
+      display: grid; grid-template-columns: 1fr auto; align-items: center;
+      height: 34px; background: #ededee; user-select: none;
+      border-bottom: 1px solid #d8d8da;
+    }
+    #drag-region { height: 100%; padding: 7px 12px; font-size: 13px; app-region: drag; }
+    #window-actions { display: flex; height: 100%; }
+    .window-button {
+      width: 44px; height: 100%; border: 0; background: transparent;
+      color: inherit; font: 18px/1 system-ui, sans-serif;
+    }
+    .window-button:hover { background: #d8d8da; }
+    #close:hover { color: white; background: #c42b1c; }
+    #viewport { width: 100%; height: calc(100% - 34px); overflow: auto; padding: 28px; }
     #diagram { display: grid; min-width: 100%; min-height: 100%; place-items: center; }
     #diagram svg { max-width: none !important; height: auto; }
     #error {
@@ -36,15 +52,31 @@ const PAGE_HTML: &str = r#"<!doctype html>
     }
     @media (prefers-color-scheme: dark) {
       body { background: #181a1b; color: #e8eaed; }
+      #titlebar { background: #242627; border-bottom-color: #343637; }
+      .window-button:hover { background: #383a3b; }
       #error { color: #ff8a80; }
     }
   </style>
 </head>
 <body>
+  <header id="titlebar">
+    <div id="drag-region" data-drag-region>mersmaid</div>
+    <div id="window-actions">
+      <button class="window-button" id="minimize" aria-label="Minimize">&#8722;</button>
+      <button class="window-button" id="close" aria-label="Close">&#215;</button>
+    </div>
+  </header>
   <main id="viewport"><div id="diagram"></div><pre id="error"></pre></main>
   <script src="/mermaid.min.js"></script>
   <script>
     document.addEventListener('DOMContentLoaded', async () => {
+      const dragRegion = document.getElementById('drag-region');
+      dragRegion.addEventListener('mousedown', event => {
+        if (event.button === 0) window.ipc.postMessage(event.detail === 2 ? 'maximize' : 'drag');
+      });
+      document.getElementById('minimize').addEventListener('click', () => window.ipc.postMessage('minimize'));
+      document.getElementById('close').addEventListener('click', () => window.ipc.postMessage('close'));
+
       const diagram = document.getElementById('diagram');
       const error = document.getElementById('error');
       try {
@@ -66,23 +98,30 @@ const PAGE_HTML: &str = r#"<!doctype html>
 </body>
 </html>"#;
 
+enum UserEvent {
+    Drag,
+    Minimize,
+    Maximize,
+    Close,
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let Some(source) = read_source()? else {
         print_help();
         return Ok(());
     };
 
-    configure_linux_cursor();
-
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let window = WindowBuilder::new()
         .with_title("mersmaid")
+        .with_decorations(false)
         .with_inner_size(LogicalSize::new(800, 560))
         .build(&event_loop)?;
     let init_script = format!(
         "window.__MERSMAID_SOURCE__ = {};",
         serde_json::to_string(&source)?
     );
+    let proxy = event_loop.create_proxy();
     let builder = WebViewBuilder::new()
         .with_custom_protocol("mersmaid".into(), |_webview_id, request| {
             let (body, content_type, status) = match request.uri().path() {
@@ -110,6 +149,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .body(body)
                 .expect("valid asset response")
         })
+        .with_ipc_handler(move |request| {
+            let event = match request.body().as_str() {
+                "drag" => Some(UserEvent::Drag),
+                "minimize" => Some(UserEvent::Minimize),
+                "maximize" => Some(UserEvent::Maximize),
+                "close" => Some(UserEvent::Close),
+                _ => None,
+            };
+            if let Some(event) = event {
+                let _ = proxy.send_event(event);
+            }
+        })
         .with_initialization_script(init_script)
         .with_url("mersmaid://localhost/index.html");
 
@@ -128,28 +179,23 @@ fn main() -> Result<(), Box<dyn Error>> {
     event_loop.run(move |event, _, control_flow| {
         let _keep_alive = (&window, &webview);
         *control_flow = ControlFlow::Wait;
-        if matches!(
-            event,
+        match event {
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
             }
-        ) {
-            *control_flow = ControlFlow::Exit;
+            | Event::UserEvent(UserEvent::Close) => *control_flow = ControlFlow::Exit,
+            Event::UserEvent(UserEvent::Drag) => {
+                let _ = window.drag_window();
+            }
+            Event::UserEvent(UserEvent::Minimize) => window.set_minimized(true),
+            Event::UserEvent(UserEvent::Maximize) => {
+                window.set_maximized(!window.is_maximized());
+            }
+            _ => {}
         }
     });
 }
-
-#[cfg(target_os = "linux")]
-fn configure_linux_cursor() {
-    if env::var_os("XCURSOR_SIZE").is_none() {
-        // This runs before GTK/WebKitGTK or any other threads are initialized.
-        unsafe { env::set_var("XCURSOR_SIZE", "24") };
-    }
-}
-
-#[cfg(not(target_os = "linux"))]
-fn configure_linux_cursor() {}
 
 fn read_source() -> Result<Option<String>, Box<dyn Error>> {
     let args: Vec<String> = env::args().skip(1).collect();
