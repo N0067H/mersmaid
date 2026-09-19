@@ -43,8 +43,11 @@ const PAGE_HTML: &str = r#"<!doctype html>
     }
     .window-button:hover { background: #d8d8da; }
     #close:hover { color: white; background: #c42b1c; }
-    #viewport { width: 100%; height: calc(100% - 34px); overflow: auto; padding: 28px; }
-    #diagram { display: grid; min-width: 100%; min-height: 100%; place-items: center; }
+    #viewport { width: 100%; height: calc(100% - 34px); overflow: hidden; padding: 28px; }
+    #diagram {
+      display: grid; min-width: 100%; min-height: 100%; place-items: center;
+      transform-origin: 0 0; will-change: transform;
+    }
     #diagram svg { max-width: none !important; height: auto; }
     #error {
       display: none; margin: 0; padding: 24px; white-space: pre-wrap;
@@ -77,7 +80,58 @@ const PAGE_HTML: &str = r#"<!doctype html>
       document.getElementById('minimize').addEventListener('click', () => window.ipc.postMessage('minimize'));
       document.getElementById('close').addEventListener('click', () => window.ipc.postMessage('close'));
 
+      const viewport = document.getElementById('viewport');
       const diagram = document.getElementById('diagram');
+      let offsetX = 0;
+      let offsetY = 0;
+      let scale = 1;
+      let pan = null;
+      const updateTransform = () => {
+        diagram.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+      };
+      viewport.addEventListener('pointerdown', event => {
+        if (event.button !== 2) return;
+        event.preventDefault();
+        pan = {
+          x: event.clientX,
+          y: event.clientY,
+          offsetX,
+          offsetY
+        };
+        viewport.setPointerCapture(event.pointerId);
+      });
+      viewport.addEventListener('pointermove', event => {
+        if (!pan) return;
+        offsetX = pan.offsetX + event.clientX - pan.x;
+        offsetY = pan.offsetY + event.clientY - pan.y;
+        updateTransform();
+      });
+      const stopPanning = event => {
+        if (!pan) return;
+        pan = null;
+        if (viewport.hasPointerCapture(event.pointerId)) viewport.releasePointerCapture(event.pointerId);
+      };
+      viewport.addEventListener('pointerup', stopPanning);
+      viewport.addEventListener('pointercancel', stopPanning);
+      viewport.addEventListener('contextmenu', event => event.preventDefault());
+      viewport.addEventListener('wheel', event => {
+        event.preventDefault();
+        if (event.ctrlKey) {
+          const rect = viewport.getBoundingClientRect();
+          const x = event.clientX - rect.left + viewport.scrollLeft;
+          const y = event.clientY - rect.top + viewport.scrollTop;
+          const nextScale = Math.min(8, Math.max(0.1, scale * Math.exp(-event.deltaY * 0.002)));
+          const ratio = nextScale / scale;
+          offsetX = x - (x - offsetX) * ratio;
+          offsetY = y - (y - offsetY) * ratio;
+          scale = nextScale;
+        } else {
+          offsetX -= event.deltaX;
+          offsetY -= event.deltaY;
+        }
+        updateTransform();
+      }, { passive: false });
+
       const error = document.getElementById('error');
       try {
         mermaid.initialize({
