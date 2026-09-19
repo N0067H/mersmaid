@@ -16,13 +16,25 @@ use tao::{
 use wry::WebViewBuilder;
 
 const MERMAID_JS: &str = include_str!("../assets/mermaid.min.js");
+const NOTO_SANS_KR: &[u8] = include_bytes!("../assets/NotoSansKR-wght.ttf");
 const PAGE_HTML: &str = r#"<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    @font-face {
+      font-family: "Mersmaid Noto Sans KR";
+      src: url("/NotoSansKR-wght.ttf") format("truetype");
+      font-style: normal;
+      font-weight: 100 900;
+      font-display: block;
+    }
+    :root {
+      color-scheme: light dark;
+      font-family: "Mersmaid Noto Sans KR", system-ui, "Noto Sans CJK KR", "Noto Sans KR",
+        "Apple SD Gothic Neo", "Malgun Gothic", Arial, sans-serif;
+    }
     * { box-sizing: border-box; }
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
     html, body, body * {
@@ -133,10 +145,14 @@ const PAGE_HTML: &str = r#"<!doctype html>
 
       const error = document.getElementById('error');
       try {
+        const fontFamily = '"Mersmaid Noto Sans KR", system-ui, "Noto Sans CJK KR", "Noto Sans KR", '
+          + '"Apple SD Gothic Neo", "Malgun Gothic", Arial, sans-serif';
         mermaid.initialize({
           startOnLoad: false,
           securityLevel: 'strict',
-          theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default'
+          theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default',
+          fontFamily,
+          themeVariables: { fontFamily }
         });
         const { svg, bindFunctions } = await mermaid.render('mersmaid-diagram', window.__MERSMAID_SOURCE__);
         diagram.innerHTML = svg;
@@ -188,6 +204,7 @@ pub fn show(source: impl Into<String>) -> Result<(), Box<dyn Error>> {
                     "text/javascript; charset=utf-8",
                     200,
                 ),
+                "/NotoSansKR-wght.ttf" => (Cow::Borrowed(NOTO_SANS_KR), "font/ttf", 200),
                 _ => (
                     Cow::Borrowed(b"Not found".as_slice()),
                     "text/plain; charset=utf-8",
