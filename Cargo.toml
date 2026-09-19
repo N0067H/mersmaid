@@ -3,6 +3,7 @@ name = "mersmaid"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
+publish = ["crates-io"]
 description = "A fast native desktop viewer for Mermaid diagrams"
 license = "MIT"
 repository = "https://github.com/N0067H/mersmaid"

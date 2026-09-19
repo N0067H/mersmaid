@@ -52,3 +52,18 @@ main thread.
 To build from source, run `cargo build --release`.
 
 On Linux, building requires the WebKitGTK 4.1 and GTK 3 development packages.
+
+## Publishing
+
+Releases are published by the `Release crate` GitHub Actions workflow. Before
+running it for the first time, add a crates.io API token as the repository
+Actions secret `CARGO_REGISTRY_TOKEN`. The token must be allowed to publish the
+`mersmaid` crate. The repository must also allow GitHub Actions to write
+contents; if the default branch is protected, allow the workflow to push its
+release commit.
+
+Run the workflow manually, enter the next version without a `v` prefix (for
+example, `0.1.1`), and confirm the release. The workflow updates `Cargo.toml`
+and `Cargo.lock`, runs the tests, checks that the bundled font and its license
+are packaged, pushes the version commit, publishes to crates.io, and pushes the
+matching Git tag.

@@ -1,0 +1,121 @@
+name: Release crate
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish, without the v prefix
+        required: true
+        default: 0.1.1
+        type: string
+      confirm:
+        description: Publish this permanent crates.io release
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-crate
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: inputs.confirm
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the selected branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate release request
+        env:
+          VERSION: ${{ inputs.version }}
+          CURRENT_BRANCH: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -eu
+          if [ "$CURRENT_BRANCH" != "$DEFAULT_BRANCH" ]; then
+            echo "Releases must run from the default branch: $DEFAULT_BRANCH" >&2
+            exit 1
+          fi
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$'; then
+            echo "Invalid SemVer version: $VERSION" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "Tag v$VERSION already exists" >&2
+            exit 1
+          fi
+
+      - name: Install Rust 1.85
+        run: |
+          rustup toolchain install 1.85.0 --profile minimal --no-self-update
+          rustup default 1.85.0
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Update package version and lockfile
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          current=$(sed -n '0,/^version = /s/^version = "\([^"]*\)"/\1/p' Cargo.toml)
+          if [ "$current" != "$VERSION" ]; then
+            sed -i "0,/^version = /s//version = \"$VERSION\"/" Cargo.toml
+          fi
+          cargo check
+
+      - name: Verify source and package
+        run: |
+          set -eu
+          cargo fmt --check
+          cargo test --locked
+          cargo package --locked --allow-dirty
+          package_files=$(cargo package --locked --allow-dirty --list)
+          printf '%s\n' "$package_files" | grep -Fx 'assets/NotoSansKR-wght.ttf'
+          printf '%s\n' "$package_files" | grep -Fx 'assets/NOTO_SANS_KR_LICENSE'
+
+      - name: Commit and push the release version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Cargo.toml Cargo.lock
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: release v$VERSION"
+            git push origin "HEAD:${{ github.event.repository.default_branch }}"
+          fi
+
+      - name: Check whether the version is already published
+        id: registry
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if curl --fail --silent --show-error \
+            "https://crates.io/api/v1/crates/mersmaid/$VERSION" >/dev/null; then
+            echo 'published=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'published=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to crates.io
+        if: steps.registry.outputs.published != 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --locked
+
+      - name: Push release tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          git tag -a "v$VERSION" -m "Release v$VERSION"
+          git push origin "v$VERSION"
