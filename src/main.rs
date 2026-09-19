@@ -72,10 +72,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     };
 
+    configure_linux_cursor();
+
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()
         .with_title("mersmaid")
-        .with_inner_size(LogicalSize::new(1100, 760))
+        .with_inner_size(LogicalSize::new(800, 560))
         .build(&event_loop)?;
     let init_script = format!(
         "window.__MERSMAID_SOURCE__ = {};",
@@ -137,6 +139,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 }
+
+#[cfg(target_os = "linux")]
+fn configure_linux_cursor() {
+    if env::var_os("XCURSOR_SIZE").is_none() {
+        // This runs before GTK/WebKitGTK or any other threads are initialized.
+        unsafe { env::set_var("XCURSOR_SIZE", "24") };
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn configure_linux_cursor() {}
 
 fn read_source() -> Result<Option<String>, Box<dyn Error>> {
     let args: Vec<String> = env::args().skip(1).collect();
