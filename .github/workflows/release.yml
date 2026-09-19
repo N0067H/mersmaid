@@ -68,7 +68,7 @@ jobs:
           set -eu
           current=$(sed -n '0,/^version = /s/^version = "\([^"]*\)"/\1/p' Cargo.toml)
           if [ "$current" != "$VERSION" ]; then
-            sed -i "0,/^version = /s//version = \"$VERSION\"/" Cargo.toml
+            sed -i "0,/^version = \"[^\"]*\"/s//version = \"$VERSION\"/" Cargo.toml
           fi
           cargo check
 
