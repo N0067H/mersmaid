@@ -78,6 +78,7 @@ const PAGE_HTML: &str = r#"<!doctype html>
     <div id="drag-region" data-drag-region>mersmaid</div>
     <div id="window-actions">
       <button class="window-button" id="minimize" aria-label="Minimize">&#8722;</button>
+      <button class="window-button" id="maximize" aria-label="Maximize or restore">&#9633;</button>
       <button class="window-button" id="close" aria-label="Close">&#215;</button>
     </div>
   </header>
@@ -90,6 +91,7 @@ const PAGE_HTML: &str = r#"<!doctype html>
         if (event.button === 0) window.ipc.postMessage(event.detail === 2 ? 'maximize' : 'drag');
       });
       document.getElementById('minimize').addEventListener('click', () => window.ipc.postMessage('minimize'));
+      document.getElementById('maximize').addEventListener('click', () => window.ipc.postMessage('maximize'));
       document.getElementById('close').addEventListener('click', () => window.ipc.postMessage('close'));
 
       const viewport = document.getElementById('viewport');
