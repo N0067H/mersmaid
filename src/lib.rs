@@ -54,12 +54,13 @@ const PAGE_HTML: &str = r#"<!doctype html>
     }
     .window-button:hover { background: #d8d8da; }
     #close:hover { color: white; background: #c42b1c; }
-    #viewport { width: 100%; height: calc(100% - 34px); overflow: hidden; padding: 28px; }
-    #diagram {
-      display: grid; min-width: 100%; min-height: 100%; place-items: center;
-      transform-origin: 0 0; will-change: transform;
+    #viewport {
+      position: relative; width: 100%; height: calc(100% - 34px); overflow: hidden;
     }
-    #diagram svg { max-width: none !important; height: auto; }
+    #diagram {
+      position: absolute; left: 0; top: 0;
+    }
+    #diagram svg { display: block; max-width: none !important; }
     #error {
       display: none; margin: 0; padding: 24px; white-space: pre-wrap;
       color: #b42318; font: 14px/1.5 ui-monospace, monospace;
@@ -96,9 +97,19 @@ const PAGE_HTML: &str = r#"<!doctype html>
       let offsetX = 0;
       let offsetY = 0;
       let scale = 1;
+      let svgElement = null;
+      let svgWidth = 0;
+      let svgHeight = 0;
       let pan = null;
-      const updateTransform = () => {
-        diagram.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+      const updateLayout = () => {
+        diagram.style.left = `${offsetX}px`;
+        diagram.style.top = `${offsetY}px`;
+        if (svgElement) {
+          // Resize the SVG viewport itself instead of scaling a cached compositor layer.
+          // This makes WebKit rasterize text and strokes again at the new resolution.
+          svgElement.style.width = `${svgWidth * scale}px`;
+          svgElement.style.height = `${svgHeight * scale}px`;
+        }
       };
       viewport.addEventListener('pointerdown', event => {
         if (event.button !== 2) return;
@@ -115,7 +126,7 @@ const PAGE_HTML: &str = r#"<!doctype html>
         if (!pan) return;
         offsetX = pan.offsetX + event.clientX - pan.x;
         offsetY = pan.offsetY + event.clientY - pan.y;
-        updateTransform();
+        updateLayout();
       });
       const stopPanning = event => {
         if (!pan) return;
@@ -129,9 +140,9 @@ const PAGE_HTML: &str = r#"<!doctype html>
         event.preventDefault();
         if (event.ctrlKey) {
           const rect = viewport.getBoundingClientRect();
-          const x = event.clientX - rect.left + viewport.scrollLeft;
-          const y = event.clientY - rect.top + viewport.scrollTop;
-          const nextScale = Math.min(8, Math.max(0.1, scale * Math.exp(-event.deltaY * 0.002)));
+          const x = event.clientX - rect.left;
+          const y = event.clientY - rect.top;
+          const nextScale = Math.min(8, Math.max(0.02, scale * Math.exp(-event.deltaY * 0.002)));
           const ratio = nextScale / scale;
           offsetX = x - (x - offsetX) * ratio;
           offsetY = y - (y - offsetY) * ratio;
@@ -140,7 +151,7 @@ const PAGE_HTML: &str = r#"<!doctype html>
           offsetX -= event.deltaX;
           offsetY -= event.deltaY;
         }
-        updateTransform();
+        updateLayout();
       }, { passive: false });
 
       const error = document.getElementById('error');
@@ -157,6 +168,20 @@ const PAGE_HTML: &str = r#"<!doctype html>
         const { svg, bindFunctions } = await mermaid.render('mersmaid-diagram', window.__MERSMAID_SOURCE__);
         diagram.innerHTML = svg;
         bindFunctions?.(diagram);
+        svgElement = diagram.querySelector('svg');
+        if (svgElement) {
+          const viewBox = svgElement.viewBox.baseVal;
+          svgWidth = viewBox.width || svgElement.getBoundingClientRect().width;
+          svgHeight = viewBox.height || svgElement.getBoundingClientRect().height;
+
+          const margin = 28;
+          const availableWidth = Math.max(1, viewport.clientWidth - margin * 2);
+          const availableHeight = Math.max(1, viewport.clientHeight - margin * 2);
+          scale = Math.min(1, availableWidth / svgWidth, availableHeight / svgHeight);
+          offsetX = (viewport.clientWidth - svgWidth * scale) / 2;
+          offsetY = (viewport.clientHeight - svgHeight * scale) / 2;
+          updateLayout();
+        }
       } catch (reason) {
         diagram.style.display = 'none';
         error.style.display = 'block';
